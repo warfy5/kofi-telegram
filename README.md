@@ -43,7 +43,7 @@ Before you begin, ensure you have met the following requirements:
 
 1. Start the bot:
    ```
-   node start.js
+   node index.js
    ```
 
 2. Set up a Ko-fi webhook to send notifications to `http://your-server-address/kofi-webhook`
