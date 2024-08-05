@@ -1,76 +1,76 @@
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 const bodyParser = require('body-parser');
+require('dotenv').config();
 
-// Replace with your Telegram Bot Token
-const TELEGRAM_BOT_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN';
-// Replace with your Ko-fi API Key
-const KOFI_API_KEY = 'YOUR_KOFI_API_KEY';
-// Replace with your Telegram group ID
-const TELEGRAM_GROUP_ID = 'YOUR_TELEGRAM_GROUP_ID';
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const KOFI_API_KEY = process.env.KOFI_API_KEY;
+const TELEGRAM_GROUP_ID = process.env.TELEGRAM_GROUP_ID;
 
-const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
+const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false });
 const app = express();
 app.use(bodyParser.json());
 
 // Store subscriptions (in-memory, replace with a database in production)
 const subscriptions = new Map();
 
-// Handle messages in Telegram
-bot.on('message', (msg) => {
-  const chatId = msg.chat.id;
-  const text = msg.text;
-
-  if (text.startsWith('telegram:')) {
-    const userId = text.split(':')[1];
-    subscriptions.set(userId, chatId);
-    bot.sendMessage(chatId, 'Your Telegram ID has been registered. You will be added to the group once your subscription is confirmed.');
-  }
-});
-
 // Ko-fi webhook endpoint
 app.post('/kofi-webhook', (req, res) => {
-  const data = req.body;
+  const data = req.body.data;
   
   if (data.verification_token !== KOFI_API_KEY) {
     return res.status(403).send('Invalid API Key');
   }
 
-  if (data.type === 'Subscription') {
-    handleSubscription(data);
+  if (data.type === 'Donation' || data.type === 'Subscription') {
+    handleKofiMessage(data);
   }
 
   res.status(200).send('OK');
 });
 
-function handleSubscription(data) {
-  const userId = data.from_name; // Assuming the Ko-fi username matches the Telegram ID
-  const chatId = subscriptions.get(userId);
+function handleKofiMessage(data) {
+  const message = data.message;
+  const match = message.match(/telegram:(\d+)/);
 
-  if (!chatId) {
-    console.log(`No Telegram chat ID found for user: ${userId}`);
-    return;
-  }
+  if (match) {
+    const telegramId = match[1];
+    const isSubscription = data.type === 'Subscription';
+    const isRecurring = data.is_recurring;
+    const isFirstSubscription = data.is_first_subscription_payment;
+    const isExpired = data.is_subscription_payment_expired;
 
-  if (data.is_subscription_payment) {
-    // Add user to the group
-    bot.inviteChatMember(TELEGRAM_GROUP_ID, chatId)
-      .then(() => {
-        bot.sendMessage(chatId, 'You have been added to the group. Thank you for your subscription!');
-      })
-      .catch((error) => {
-        console.error('Error adding user to group:', error);
-      });
-  } else if (data.is_expired) {
-    // Remove user from the group
-    bot.kickChatMember(TELEGRAM_GROUP_ID, chatId)
-      .then(() => {
-        bot.sendMessage(chatId, 'Your subscription has expired. You have been removed from the group.');
-      })
-      .catch((error) => {
-        console.error('Error removing user from group:', error);
-      });
+    if (isSubscription) {
+      if (isFirstSubscription || isRecurring) {
+        addUserToGroup(telegramId);
+      } else if (isExpired) {
+        removeUserFromGroup(telegramId);
+      }
+    } else {
+      // For one-time donations, you might want to add them temporarily or handle differently
+      addUserToGroup(telegramId);
+    }
   }
+}
+
+function addUserToGroup(telegramId) {
+  bot.inviteChatMember(TELEGRAM_GROUP_ID, telegramId)
+    .then(() => {
+      bot.sendMessage(telegramId, 'You have been added to the group. Thank you for your support!');
+    })
+    .catch((error) => {
+      console.error('Error adding user to group:', error);
+    });
+}
+
+function removeUserFromGroup(telegramId) {
+  bot.kickChatMember(TELEGRAM_GROUP_ID, telegramId)
+    .then(() => {
+      bot.sendMessage(telegramId, 'Your subscription has expired. You have been removed from the group.');
+    })
+    .catch((error) => {
+      console.error('Error removing user from group:', error);
+    });
 }
 
 const PORT = process.env.PORT || 3000;
